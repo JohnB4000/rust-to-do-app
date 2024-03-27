@@ -1,9 +1,5 @@
 use std::io::{self, Write};
 
-struct ToDoList {
-    todo_items: Vec<ToDoItem>,
-}
-
 struct ToDoItem {
     name: String,
     status: bool,
@@ -12,13 +8,13 @@ struct ToDoItem {
     subitems: Vec<ToDoItem>,
 }
 
-fn print_todo_list(todo_list: &ToDoList) {
-    let (longest_name, longest_due, longest_desc) = calculate_lengths(&todo_list.todo_items, 0);
+fn print_todo_list(todo_list: &ToDoItem) {
+    let (longest_name, longest_due, longest_desc) = calculate_lengths(&todo_list.subitems, 0);
     let total = longest_name + 3 + longest_due + 3 + longest_desc + 4;
     print_divider(total);
     print_header(longest_name, longest_due, longest_desc);
     print_todo_items(
-        &todo_list.todo_items,
+        &todo_list.subitems,
         longest_name,
         longest_due,
         longest_desc,
@@ -168,48 +164,76 @@ fn print_todo_item(
     println!("|");
 }
 
-fn get_nth_todo(todo_list: &mut ToDoList, index: String) -> Option<&mut ToDoItem> {
-    let mut index_iter = index.split(".");
+fn get_nth_todo(todo_list: &mut ToDoItem, index_list: Vec<usize>) -> Option<&mut ToDoItem> {
+    let mut current_todo_item: Option<&mut ToDoItem> = Some(todo_list);
 
-    let mut parent = match index_iter.next() {
-        Some(index) => match index.parse::<usize>() {
-            Ok(number) => &mut todo_list.todo_items[number - 1],
-            Err(_) => {
-                println!("Invalid index");
-                return None;
-            }
-        },
-        None => {
-            println!("Invalid index");
-            return None;
-        }
-    };
-
-    loop {
-        let next_index = match index_iter.next() {
-            Some(index) => match index.parse::<usize>() {
-                Ok(number) => number - 1,
-                Err(_) => {
-                    println!("Invalid index");
-                    return None;
+    for index in index_list {
+        current_todo_item = match current_todo_item {
+            Some(todo_item) => {
+                if index < todo_item.subitems.len() {
+                    Some(&mut todo_item.subitems[index])
+                } else {
+                    None
                 }
-            },
-            None => return Some(parent),
-        };
-
-        if next_index - 1 < parent.subitems.len() {
-            parent = &mut parent.subitems[next_index - 1];
-        } else {
-            println!("Invalid index");
-            return None;
+            }
+            None => None,
         }
     }
+
+    current_todo_item
+}
+
+fn get_nth_parent(
+    todo_list: &mut ToDoItem,
+    index_list: Vec<usize>,
+) -> Option<(&mut ToDoItem, usize)> {
+    if index_list.len() == 1 {
+        return Some((todo_list, index_list[0]));
+    }
+
+    let mut current_todo_item: Option<(&mut ToDoItem, usize)> = Some((todo_list, index_list[0]));
+
+    for index in 0..(index_list.len() - 1) {
+        current_todo_item = match current_todo_item {
+            Some((todo_item, previous_index)) => {
+                if index_list[index] < todo_item.subitems.len() {
+                    Some((
+                        &mut todo_item.subitems[index_list[index]],
+                        index_list[index],
+                    ))
+                } else {
+                    Some((todo_item, previous_index))
+                }
+            }
+            None => None,
+        }
+    }
+    current_todo_item
+}
+
+fn convert_to_index_list(string_index_list: String) -> Option<Vec<usize>> {
+    let mut index_list = Vec::new();
+    let mut index_iter = string_index_list.split(".");
+
+    while let Some(index) = index_iter.next() {
+        match index.parse::<usize>() {
+            Ok(number) => index_list.push(number - 1),
+            Err(_) => return None,
+        }
+    }
+
+    Some(index_list)
 }
 
 fn main() {
-    let mut todo_list: ToDoList = ToDoList {
-        todo_items: Vec::new(),
+    let mut todo_list: ToDoItem = ToDoItem {
+        name: "To Do List".to_string(),
+        due: "".to_string(),
+        description: "".to_string(),
+        status: false,
+        subitems: Vec::new(),
     };
+
     loop {
         println!();
         println!();
@@ -234,7 +258,8 @@ fn main() {
                         continue;
                     }
                 };
-                todo_list.todo_items.push(ToDoItem {
+
+                todo_list.subitems.push(ToDoItem {
                     name,
                     status: false,
                     due: input.next().unwrap_or("").to_string(),
@@ -259,17 +284,23 @@ fn main() {
                     }
                 };
 
-                let parent = match get_nth_todo(&mut todo_list, index) {
-                    None => continue,
-                    Some(parent) => parent,
+                let index_list = match convert_to_index_list(index) {
+                    Some(index_list) => index_list,
+                    None => {
+                        println!("Invalid index");
+                        continue;
+                    }
                 };
-                parent.subitems.push(ToDoItem {
-                    name,
-                    status: false,
-                    due: input.next().unwrap_or("").to_string(),
-                    description: input.next().unwrap_or("").to_string(),
-                    subitems: Vec::new(),
-                });
+
+                if let Some(parent) = get_nth_todo(&mut todo_list, index_list) {
+                    parent.subitems.push(ToDoItem {
+                        name,
+                        status: false,
+                        due: input.next().unwrap_or("").to_string(),
+                        description: input.next().unwrap_or("").to_string(),
+                        subitems: Vec::new(),
+                    });
+                };
             }
             "check" | "uncheck" => {
                 let index = match input.next() {
@@ -280,9 +311,38 @@ fn main() {
                     }
                 };
 
-                if let Some(todo_item) = get_nth_todo(&mut todo_list, index) {
+                let index_list = match convert_to_index_list(index) {
+                    Some(index_list) => index_list,
+                    None => {
+                        println!("Invalid index");
+                        continue;
+                    }
+                };
+
+                if let Some(todo_item) = get_nth_todo(&mut todo_list, index_list) {
                     todo_item.status = command == "check";
                 }
+            }
+            "delete" => {
+                let index = match input.next() {
+                    Some(index) => index.to_string(),
+                    None => {
+                        println!("Invalid index!");
+                        continue;
+                    }
+                };
+
+                let index_list = match convert_to_index_list(index) {
+                    Some(index_list) => index_list,
+                    None => {
+                        println!("Invalid index");
+                        continue;
+                    }
+                };
+                match get_nth_parent(&mut todo_list, index_list) {
+                    Some((parent, index)) => parent.subitems.remove(index),
+                    None => continue,
+                };
             }
             _ => continue,
         }
